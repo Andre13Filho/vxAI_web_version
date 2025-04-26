@@ -1,5 +1,8 @@
 # Especialista em Impermeabilização - IA
 
+# Site para acessar a aplicação:
+https://vximperai.streamlit.app/
+
 Um assistente virtual baseado em IA especializado em produtos de impermeabilização de diversas marcas.
 
 ## 📝 Descrição
