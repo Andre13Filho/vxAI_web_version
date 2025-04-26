@@ -2,8 +2,13 @@ import streamlit as st
 import os
 import sys
 import requests
+import logging
 from models import get_conversation_chain, get_available_brands
 from dotenv import load_dotenv
+
+# Configuração de logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Carrega variáveis de ambiente
 load_dotenv()
@@ -36,6 +41,22 @@ def verify_groq_api_key(api_key):
     except Exception as e:
         return False, str(e)
 
+# Função para verificar se o diretório vectordb existe
+def check_vectordb_directory():
+    """
+    Verifica se o diretório vectordb existe e tem conteúdo.
+    """
+    if not os.path.exists("vectordb"):
+        logger.error("Diretório vectordb não encontrado")
+        return False, "O diretório vectordb não foi encontrado. Execute o script ingest.py primeiro."
+    
+    if not os.listdir("vectordb"):
+        logger.error("Diretório vectordb está vazio")
+        return False, "O diretório vectordb está vazio. Execute o script ingest.py para processar os documentos."
+    
+    logger.info(f"Diretório vectordb encontrado com conteúdo: {os.listdir('vectordb')}")
+    return True, None
+
 # Título da aplicação
 st.title("💧 Especialista em Impermeabilização")
 st.markdown("""
@@ -44,6 +65,36 @@ st.markdown("""
 Este sistema utiliza inteligência artificial para responder suas dúvidas sobre produtos de impermeabilização 
 de diversas marcas, com base nas fichas técnicas oficiais dos produtos.
 """)
+
+# Verifica se o diretório vectordb existe e tem conteúdo
+vectordb_exists, vectordb_error = check_vectordb_directory()
+if not vectordb_exists:
+    st.error(f"""
+    ⚠️ **Problema com o banco de dados vetorial**
+    
+    {vectordb_error}
+    
+    No Streamlit Cloud, isso pode ocorrer porque o diretório não foi incluído no repositório Git.
+    Verifique o arquivo README_DEPLOY.md para instruções sobre como resolver este problema.
+    """)
+    
+    # Mostra informações para debug
+    st.expander("Informações para debug").info(f"""
+    Diretório atual: {os.getcwd()}
+    Conteúdo do diretório atual: {os.listdir('.')}
+    """)
+    
+    # Oferece a opção de criar o banco de dados
+    if st.button("Iniciar Processamento de Documentos", type="primary"):
+        try:
+            import ingest
+            ingest.main()
+            st.success("Processamento concluído com sucesso! Recarregando a aplicação...")
+            st.experimental_rerun()
+        except Exception as e:
+            st.error(f"Erro durante o processamento: {str(e)}")
+    
+    st.stop()
 
 # Inicializa o estado da sessão se não existir
 if "conversation" not in st.session_state:
@@ -67,6 +118,7 @@ if not groq_api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
     groq_api_key = st.secrets["GROQ_API_KEY"].strip()
     # Adiciona a chave ao ambiente para que o módulo models.py possa acessá-la
     os.environ["GROQ_API_KEY"] = groq_api_key
+    logger.info("Chave da API obtida dos segredos do Streamlit")
 
 # Verifica se a chave existe
 if not groq_api_key:
@@ -129,19 +181,34 @@ else:
             st.stop()
 
 # Verifica se existem bancos de dados vetoriais
-brands = get_available_brands()
-if not brands:
-    st.warning("""
-    ⚠️ **Nenhum banco de dados vetorial encontrado!**
+try:
+    brands = get_available_brands()
+    if not brands:
+        st.warning("""
+        ⚠️ **Nenhum banco de dados vetorial encontrado!**
+        
+        Para usar este aplicativo, você precisa primeiro processar os documentos e criar os bancos de dados vetoriais:
+        
+        1. Execute o script `ingest.py` para processar os documentos PDF e criar os bancos de dados.
+        """)
+        if st.button("Processar Documentos", type="primary"):
+            try:
+                import ingest
+                ingest.main()
+                st.success("Processamento concluído com sucesso! Recarregando a aplicação...")
+                st.experimental_rerun()
+            except Exception as e:
+                st.error(f"Erro durante o processamento: {str(e)}")
+        st.stop()
+except Exception as e:
+    st.error(f"""
+    ⚠️ **Erro ao carregar bancos de dados vetoriais**
     
-    Para usar este aplicativo, você precisa primeiro processar os documentos e criar os bancos de dados vetoriais:
+    Ocorreu um erro ao tentar carregar os bancos de dados vetoriais: {str(e)}
     
-    1. Execute o script `ingest.py` para processar os documentos PDF e criar os bancos de dados.
+    Consulte os logs para mais detalhes.
     """)
-    if st.button("Processar Documentos", type="primary"):
-        import ingest
-        ingest.main()
-        st.rerun()
+    logger.error(f"Erro ao carregar bancos de dados vetoriais: {str(e)}")
     st.stop()
 
 # Sidebar com seleção de marca
@@ -163,9 +230,14 @@ with st.sidebar:
     
     if selected_brand_obj and selected_brand_obj["folder"] != st.session_state.selected_brand:
         st.session_state.selected_brand = selected_brand_obj["folder"]
-        st.session_state.conversation = get_conversation_chain(selected_brand_obj["folder"])
-        st.session_state.chat_history = []
-        st.session_state.messages = []
+        try:
+            st.session_state.conversation = get_conversation_chain(selected_brand_obj["folder"])
+            st.session_state.chat_history = []
+            st.session_state.messages = []
+        except Exception as e:
+            st.error(f"Erro ao carregar a conversa para a marca {selected_brand_display}: {str(e)}")
+            logger.error(f"Erro ao carregar a conversa: {str(e)}")
+            st.session_state.conversation = None
         
     st.markdown("---")
     st.markdown("### Sobre este app")
@@ -219,6 +291,7 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
             st.session_state.messages.append({"role": "assistant", "content": answer})
         except Exception as e:
             error_message = str(e)
+            logger.error(f"Erro ao gerar resposta: {error_message}")
             message_placeholder.error(f"Erro ao gerar resposta: {error_message}")
             if "401" in error_message and "Invalid API Key" in error_message:
                 st.error("""
@@ -233,5 +306,10 @@ if st.button("Limpar Chat"):
     st.session_state.messages = []
     # Reinicializa a conversa com a marca selecionada
     if st.session_state.selected_brand:
-        st.session_state.conversation = get_conversation_chain(st.session_state.selected_brand)
+        try:
+            st.session_state.conversation = get_conversation_chain(st.session_state.selected_brand)
+        except Exception as e:
+            st.error(f"Erro ao reinicializar a conversa: {str(e)}")
+            logger.error(f"Erro ao reinicializar a conversa: {str(e)}")
+            st.session_state.conversation = None
     st.rerun() 

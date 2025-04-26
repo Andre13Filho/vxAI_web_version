@@ -11,7 +11,8 @@ ENV/
 .streamlit/secrets.toml
 
 # Banco de dados vetoriais
-vectordb/
+# Comentado para permitir que o diretório vectordb seja incluído no repositório Git
+# vectordb/
 
 # Cache e arquivos temporários
 __pycache__/
