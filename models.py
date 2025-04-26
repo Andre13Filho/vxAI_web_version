@@ -287,12 +287,11 @@ def get_conversation_chain(brand):
             search_type="similarity",  # Busca por similaridade
             search_kwargs={
                 "k": 3,  # Recupera 3 documentos, mas só usará o primeiro para responder
-                "filter": None  # O filtro será aplicado dinamicamente na função abaixo
             }
         )
         
         # Função para extrair o nome do produto da pergunta e filtrar resultados
-        def get_relevant_documents(question):
+        def get_relevant_documents_custom(question):
             # Lista de produtos conhecidos (adaptado para cada marca)
             # Mapeia partes dos nomes comuns dos produtos para os nomes exatos dos arquivos
             product_mapping = {
@@ -398,30 +397,30 @@ def get_conversation_chain(brand):
                 
                 # Se ainda não encontrar, usa a busca padrão
                 if docs_with_filter:
-                    return docs_with_filter
+                    return docs_with_filter[:1]  # Retorna apenas o primeiro documento
             
             # Se nenhum produto for identificado ou se a filtragem falhar, retorna os documentos normalmente
             logger.info("Usando busca padrão sem filtro de produto específico")
-            return vectordb.similarity_search(question, k=3)
+            docs = vectordb.similarity_search(question, k=1)
+            return docs
         
-        # Substitui o retriever padrão pelo retriever personalizado
-        retriever.get_relevant_documents = get_relevant_documents
-        
-        # Cria uma classe wrapper para o retriever que limita os resultados
-        class SingleDocumentRetriever:
-            def __init__(self, base_retriever):
-                self.base_retriever = base_retriever
+        # Cria uma classe que embrulha o retriever
+        from langchain.schema.retriever import BaseRetriever
+
+        class CustomRetriever(BaseRetriever):
+            def __init__(self, vectordb):
+                self.vectordb = vectordb
             
             def get_relevant_documents(self, query):
-                docs = self.base_retriever.get_relevant_documents(query)
-                if docs:
-                    # Retorna apenas o primeiro documento
-                    logger.info(f"Limitando a resposta a um único documento: {docs[0].metadata.get('product', 'Desconhecido')}")
-                    return [docs[0]]
-                return []
+                return get_relevant_documents_custom(query)
+            
+            async def aget_relevant_documents(self, query):
+                # Implementação assíncrona (necessária para a interface BaseRetriever)
+                return self.get_relevant_documents(query)
         
-        # Envolve o retriever para garantir que apenas um documento seja usado
-        single_doc_retriever = SingleDocumentRetriever(retriever)
+        # Cria uma instância do retriever personalizado
+        logger.info("Criando retriever personalizado...")
+        custom_retriever = CustomRetriever(vectordb)
         
         # Mensagem do sistema para controlar o comportamento do modelo
         system_template = """Você é um especialista em produtos de impermeabilização da marca """ + brand_display + """.
@@ -462,7 +461,7 @@ Responda a pergunta do usuário com base APENAS no contexto técnico fornecido a
         logger.info("Criando cadeia de conversação com prompt personalizado...")
         conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
-            retriever=single_doc_retriever,
+            retriever=custom_retriever,
             memory=memory,
             verbose=True,
             combine_docs_chain_kwargs={"prompt": chat_prompt},
