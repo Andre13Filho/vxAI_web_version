@@ -90,7 +90,7 @@ if not vectordb_exists:
             import ingest
             ingest.main()
             st.success("Processamento concluído com sucesso! Recarregando a aplicação...")
-            st.experimental_rerun()
+            st.rerun()
         except Exception as e:
             st.error(f"Erro durante o processamento: {str(e)}")
     
@@ -142,7 +142,7 @@ if not groq_api_key:
                 groq_api_key = manual_key.strip()
                 os.environ["GROQ_API_KEY"] = groq_api_key
                 st.success("✅ Chave válida! A aplicação está pronta para uso.")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error(f"❌ Chave inválida! Erro: {error}")
     
@@ -173,7 +173,7 @@ else:
                     groq_api_key = manual_key.strip()
                     os.environ["GROQ_API_KEY"] = groq_api_key
                     st.success("✅ Chave válida! A aplicação está pronta para uso.")
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error(f"❌ Chave inválida! Erro: {error}")
         
@@ -196,7 +196,7 @@ try:
                 import ingest
                 ingest.main()
                 st.success("Processamento concluído com sucesso! Recarregando a aplicação...")
-                st.experimental_rerun()
+                st.rerun()
             except Exception as e:
                 st.error(f"Erro durante o processamento: {str(e)}")
         st.stop()
