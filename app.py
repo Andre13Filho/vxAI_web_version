@@ -322,7 +322,7 @@ with st.sidebar:
     st.markdown("### Configurações")
     
     # Opção para mostrar fontes das respostas
-    show_sources = st.checkbox("Mostrar fontes das respostas", value=True)
+    show_sources = st.checkbox("Mostrar fontes das respostas", value=True, key="show_sources_sidebar_config")
     if show_sources:
         st.info("As fontes usadas para cada resposta serão exibidas abaixo das respostas.")
         
@@ -354,7 +354,7 @@ for i, message in enumerate(st.session_state.messages):
         st.markdown(message["content"])
         
         # Se for uma mensagem do assistente e temos fontes para ela
-        if message["role"] == "assistant" and i // 2 < len(st.session_state.source_documents) and st.sidebar.checkbox("Mostrar fontes das respostas", value=True):
+        if message["role"] == "assistant" and i // 2 < len(st.session_state.source_documents) and st.sidebar.checkbox("Mostrar fontes das respostas", value=True, key=f"show_sources_message_{i}"):
             with st.expander("🔍 Fontes desta resposta"):
                 sources = st.session_state.source_documents[i // 2]
                 st.markdown(format_source_documents(sources))
@@ -413,7 +413,7 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
             st.session_state.messages.append({"role": "assistant", "content": answer})
             
             # Exibe fontes se a opção estiver ativada
-            if st.sidebar.checkbox("Mostrar fontes das respostas", value=True) and "source_documents" in response:
+            if st.sidebar.checkbox("Mostrar fontes das respostas", value=True, key="show_sources_response") and "source_documents" in response:
                 with st.expander("🔍 Fontes desta resposta"):
                     sources = response["source_documents"]
                     st.markdown(format_source_documents(sources))
