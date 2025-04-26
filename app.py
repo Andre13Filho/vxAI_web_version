@@ -71,6 +71,7 @@ def initialize_conversation(brand_folder, brand_display_name):
         # Limpa o histórico
         st.session_state.chat_history = []
         st.session_state.messages = []
+        st.session_state.source_documents = []
         
         # Atualiza o estado da conversa
         st.session_state.selected_brand = brand_folder
@@ -81,6 +82,30 @@ def initialize_conversation(brand_folder, brand_display_name):
         error_details = traceback.format_exc()
         logger.error(f"Erro ao inicializar conversa para {brand_folder}: {str(e)}\n{error_details}")
         return False, f"Erro ao carregar a conversa para a marca {brand_display_name}: {str(e)}"
+
+# Função para formatar documentos fonte para exibição
+def format_source_documents(source_docs):
+    """
+    Formata os documentos fonte para exibição legível.
+    """
+    if not source_docs:
+        return "Nenhuma fonte disponível"
+    
+    formatted_sources = []
+    
+    for i, doc in enumerate(source_docs, 1):
+        metadata = doc.metadata
+        product = metadata.get("product", "N/A")
+        page = metadata.get("page", "N/A")
+        source = metadata.get("source", "N/A")
+        
+        # Extrai apenas o nome do arquivo do caminho completo
+        if source != "N/A":
+            source = os.path.basename(source)
+        
+        formatted_sources.append(f"**Fonte {i}**: Produto: {product}, Página: {page}, Arquivo: {source}")
+    
+    return "\n\n".join(formatted_sources)
 
 # Título da aplicação
 st.title("💧 Especialista em Impermeabilização")
@@ -132,6 +157,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "conversation_error" not in st.session_state:
     st.session_state.conversation_error = None
+if "source_documents" not in st.session_state:
+    st.session_state.source_documents = []
 
 # Tenta obter a chave da API do Groq de múltiplas fontes
 groq_api_key = os.environ.get("GROQ_API_KEY")
@@ -289,6 +316,15 @@ with st.sidebar:
             else:
                 st.error(error_msg)
                 st.session_state.conversation_error = error_msg
+    
+    # Opções adicionais de configuração
+    st.markdown("---")
+    st.markdown("### Configurações")
+    
+    # Opção para mostrar fontes das respostas
+    show_sources = st.checkbox("Mostrar fontes das respostas", value=True)
+    if show_sources:
+        st.info("As fontes usadas para cada resposta serão exibidas abaixo das respostas.")
         
     st.markdown("---")
     st.markdown("### Sobre este app")
@@ -313,9 +349,15 @@ with debug_expander:
         st.warning("A conversa não está inicializada. Selecione uma marca e clique em 'Confirmar Seleção'.")
 
 # Exibe mensagens do histórico
-for message in st.session_state.messages:
+for i, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        
+        # Se for uma mensagem do assistente e temos fontes para ela
+        if message["role"] == "assistant" and i // 2 < len(st.session_state.source_documents) and st.sidebar.checkbox("Mostrar fontes das respostas", value=True):
+            with st.expander("🔍 Fontes desta resposta"):
+                sources = st.session_state.source_documents[i // 2]
+                st.markdown(format_source_documents(sources))
 
 # Campo de entrada de mensagem
 if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabilização..."):
@@ -341,6 +383,15 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
             response = st.session_state.conversation({"question": prompt})
             answer = response["answer"]
             
+            # Guarda os documentos fonte para exibição
+            if "source_documents" in response:
+                st.session_state.source_documents.append(response["source_documents"])
+                
+                # Log dos documentos recuperados para debug
+                logger.info(f"Documentos recuperados: {len(response['source_documents'])}")
+                for i, doc in enumerate(response["source_documents"]):
+                    logger.info(f"Documento {i+1}: {doc.metadata}")
+            
             # Atualiza histórico da conversação
             st.session_state.chat_history = response["chat_history"]
             
@@ -349,6 +400,13 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
             
             # Adiciona resposta do assistente ao histórico
             st.session_state.messages.append({"role": "assistant", "content": answer})
+            
+            # Exibe fontes se a opção estiver ativada
+            if st.sidebar.checkbox("Mostrar fontes das respostas", value=True) and "source_documents" in response:
+                with st.expander("🔍 Fontes desta resposta"):
+                    sources = response["source_documents"]
+                    st.markdown(format_source_documents(sources))
+                    
         except Exception as e:
             error_message = str(e)
             error_details = traceback.format_exc()
@@ -365,4 +423,5 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
 if st.button("Limpar Chat"):
     st.session_state.chat_history = []
     st.session_state.messages = []
+    st.session_state.source_documents = []
     st.rerun() 

@@ -5,6 +5,13 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain.prompts.chat import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+)
 import logging
 import sys
 import importlib.util
@@ -244,7 +251,7 @@ def get_llm():
         llm = ChatGroq(
             api_key=api_key,
             model_name="llama3-70b-8192",
-            temperature=0.2,
+            temperature=0.1,  # Reduzindo a temperatura para respostas mais precisas
             max_tokens=4096,
         )
         logger.info("Modelo LLM inicializado com sucesso")
@@ -269,14 +276,55 @@ def get_conversation_chain(brand):
             return_messages=True
         )
         
-        # Configura a cadeia de conversação
-        logger.info("Criando cadeia de conversação...")
+        # Mensagem do sistema para controlar o comportamento do modelo
+        system_template = """Você é um especialista em produtos de impermeabilização da marca {brand}.
+        
+Sua função é responder perguntas sobre os produtos com base EXCLUSIVAMENTE nas informações das fichas técnicas oficiais.
+
+REGRAS IMPORTANTES:
+1. Use APENAS as informações fornecidas nas fichas técnicas para responder.
+2. Se a informação solicitada não estiver nas fichas técnicas, informe claramente que não possui essa informação.
+3. NÃO INVENTE ou DEDUZA informações que não estejam explicitamente nas fichas técnicas.
+4. Cite especificamente de qual produto vem a informação que você está mencionando.
+5. Se for solicitado a comparar produtos, faça isso apenas baseado nas fichas técnicas disponíveis.
+6. Seu conhecimento vem exclusivamente das fichas técnicas, não de outras fontes ou experiência prévia.
+
+Contexto técnico recuperado: 
+{context}
+
+Histórico da conversa:
+{chat_history}
+
+Responda a pergunta do usuário com base APENAS no contexto técnico fornecido acima.
+"""
+        
+        # Mensagem do usuário
+        human_template = "{question}"
+        
+        # Constrói o prompt completo
+        system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)
+        human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
+        
+        # Junta as mensagens para formar o prompt completo
+        chat_prompt = ChatPromptTemplate.from_messages(
+            [system_message_prompt, human_message_prompt]
+        )
+        
+        # Configura a cadeia de conversação com o prompt personalizado
+        logger.info("Criando cadeia de conversação com prompt personalizado...")
         conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
-            retriever=vectordb.as_retriever(search_kwargs={"k": 5}),
+            retriever=vectordb.as_retriever(search_kwargs={"k": 8}),  # Aumentando o número de documentos recuperados
             memory=memory,
-            verbose=True
+            verbose=True,
+            combine_docs_chain_kwargs={"prompt": chat_prompt},
+            chain_type="stuff",  # Usando o tipo "stuff" para melhor contexto
+            return_source_documents=True  # Retorna os documentos fonte para debugging
         )
+        
+        # Adiciona a marca como parâmetro para o template
+        conversation_chain.combine_docs_chain.llm_chain.prompt.messages[0].prompt.partial_variables["brand"] = brand.replace("FT - ", "").replace("FT_", "")
+        
         logger.info("Cadeia de conversação criada com sucesso")
         
         return conversation_chain
