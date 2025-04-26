@@ -5,6 +5,7 @@ import requests
 import logging
 from models import get_conversation_chain, get_available_brands
 from dotenv import load_dotenv
+import traceback
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -57,6 +58,30 @@ def check_vectordb_directory():
     logger.info(f"Diretório vectordb encontrado com conteúdo: {os.listdir('vectordb')}")
     return True, None
 
+# Função para inicializar a conversa para uma marca
+def initialize_conversation(brand_folder, brand_display_name):
+    """
+    Inicializa a conversa para a marca selecionada e trata possíveis erros.
+    """
+    try:
+        logger.info(f"Inicializando conversa para a marca: {brand_folder}")
+        conversation = get_conversation_chain(brand_folder)
+        logger.info(f"Conversa inicializada com sucesso para {brand_folder}")
+        
+        # Limpa o histórico
+        st.session_state.chat_history = []
+        st.session_state.messages = []
+        
+        # Atualiza o estado da conversa
+        st.session_state.selected_brand = brand_folder
+        st.session_state.conversation = conversation
+        
+        return True, None
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"Erro ao inicializar conversa para {brand_folder}: {str(e)}\n{error_details}")
+        return False, f"Erro ao carregar a conversa para a marca {brand_display_name}: {str(e)}"
+
 # Título da aplicação
 st.title("💧 Especialista em Impermeabilização")
 st.markdown("""
@@ -105,6 +130,8 @@ if "selected_brand" not in st.session_state:
     st.session_state.selected_brand = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "conversation_error" not in st.session_state:
+    st.session_state.conversation_error = None
 
 # Tenta obter a chave da API do Groq de múltiplas fontes
 groq_api_key = os.environ.get("GROQ_API_KEY")
@@ -222,22 +249,46 @@ with st.sidebar:
     selected_brand_display = st.selectbox(
         "Marca:",
         options=brand_options,
-        index=0 if brand_options else None
+        index=0 if brand_options else None,
+        key="brand_selector"
     )
     
     # Encontrar o objeto completo da marca selecionada
     selected_brand_obj = next((brand for brand in brands if brand["display"] == selected_brand_display), None)
     
-    if selected_brand_obj and selected_brand_obj["folder"] != st.session_state.selected_brand:
-        st.session_state.selected_brand = selected_brand_obj["folder"]
-        try:
-            st.session_state.conversation = get_conversation_chain(selected_brand_obj["folder"])
-            st.session_state.chat_history = []
-            st.session_state.messages = []
-        except Exception as e:
-            st.error(f"Erro ao carregar a conversa para a marca {selected_brand_display}: {str(e)}")
-            logger.error(f"Erro ao carregar a conversa: {str(e)}")
-            st.session_state.conversation = None
+    # Botão explícito para selecionar a marca
+    if st.button("Confirmar Seleção", type="primary"):
+        if selected_brand_obj:
+            # Reinicializa a conversa para a marca selecionada
+            success, error_msg = initialize_conversation(selected_brand_obj["folder"], selected_brand_display)
+            if success:
+                st.success(f"✅ Marca {selected_brand_display} selecionada com sucesso!")
+                st.session_state.conversation_error = None
+            else:
+                st.error(error_msg)
+                st.session_state.conversation_error = error_msg
+        else:
+            st.error("Por favor, selecione uma marca válida.")
+    
+    # Exibe o status atual da seleção
+    if st.session_state.selected_brand:
+        st.success(f"Marca atual: {selected_brand_display}")
+    
+    # Exibe mensagem de erro se houver
+    if st.session_state.conversation_error:
+        st.error(f"Erro: {st.session_state.conversation_error}")
+        
+    # Botão para forçar a reinicialização da conversa (para quando ocorrerem erros)
+    if st.button("Reinicializar Conversa"):
+        if selected_brand_obj:
+            success, error_msg = initialize_conversation(selected_brand_obj["folder"], selected_brand_display)
+            if success:
+                st.success("✅ Conversa reinicializada com sucesso!")
+                st.session_state.conversation_error = None
+                st.rerun()
+            else:
+                st.error(error_msg)
+                st.session_state.conversation_error = error_msg
         
     st.markdown("---")
     st.markdown("### Sobre este app")
@@ -251,6 +302,15 @@ with st.sidebar:
 
 # Interface principal de chat
 st.header(f"Chat com Especialista - {selected_brand_display}")
+
+# Adiciona informações de estado para diagnóstico
+debug_expander = st.expander("Informações de Diagnóstico")
+with debug_expander:
+    st.write(f"Marca selecionada: {st.session_state.selected_brand}")
+    st.write(f"Conversa inicializada: {'Sim' if st.session_state.conversation else 'Não'}")
+    st.write(f"Total de mensagens no histórico: {len(st.session_state.messages)}")
+    if not st.session_state.conversation:
+        st.warning("A conversa não está inicializada. Selecione uma marca e clique em 'Confirmar Seleção'.")
 
 # Exibe mensagens do histórico
 for message in st.session_state.messages:
@@ -268,7 +328,7 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
     
     # Verifica se a conversa foi inicializada
     if not st.session_state.conversation:
-        st.error("Por favor, selecione uma marca antes de fazer perguntas.")
+        st.error("Por favor, selecione uma marca e clique em 'Confirmar Seleção' antes de fazer perguntas.")
         st.stop()
     
     # Exibe indicador de carregamento durante a geração da resposta
@@ -291,7 +351,8 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
             st.session_state.messages.append({"role": "assistant", "content": answer})
         except Exception as e:
             error_message = str(e)
-            logger.error(f"Erro ao gerar resposta: {error_message}")
+            error_details = traceback.format_exc()
+            logger.error(f"Erro ao gerar resposta: {error_message}\n{error_details}")
             message_placeholder.error(f"Erro ao gerar resposta: {error_message}")
             if "401" in error_message and "Invalid API Key" in error_message:
                 st.error("""
@@ -304,12 +365,4 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
 if st.button("Limpar Chat"):
     st.session_state.chat_history = []
     st.session_state.messages = []
-    # Reinicializa a conversa com a marca selecionada
-    if st.session_state.selected_brand:
-        try:
-            st.session_state.conversation = get_conversation_chain(st.session_state.selected_brand)
-        except Exception as e:
-            st.error(f"Erro ao reinicializar a conversa: {str(e)}")
-            logger.error(f"Erro ao reinicializar a conversa: {str(e)}")
-            st.session_state.conversation = None
     st.rerun() 
