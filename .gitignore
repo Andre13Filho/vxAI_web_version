@@ -1,0 +1,35 @@
+# Ambiente virtual
+venv/
+env/
+ENV/
+.venv/
+.python-version
+.pyenv/
+
+# Arquivos de ambiente
+.env
+.streamlit/secrets.toml
+
+# Banco de dados vetoriais
+vectordb/
+
+# Cache e arquivos temporários
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Distribuição / packaging
+dist/
+build/
+*.egg-info/ 

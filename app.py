@@ -1,0 +1,237 @@
+import streamlit as st
+import os
+import sys
+import requests
+from models import get_conversation_chain, get_available_brands
+from dotenv import load_dotenv
+
+# Carrega variáveis de ambiente
+load_dotenv()
+
+# Configuração da página Streamlit
+st.set_page_config(
+    page_title="Especialista em Impermeabilização",
+    page_icon="💧",
+    layout="wide"
+)
+
+# Função para verificar a validade da chave da API do Groq
+def verify_groq_api_key(api_key):
+    """
+    Verifica se a chave da API do Groq é válida fazendo uma chamada de teste.
+    Retorna (True, None) se for válida, (False, erro) se for inválida.
+    """
+    url = "https://api.groq.com/openai/v1/models"
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return True, None
+        else:
+            error_message = f"Status: {response.status_code} - {response.text}"
+            return False, error_message
+    except Exception as e:
+        return False, str(e)
+
+# Título da aplicação
+st.title("💧 Especialista em Impermeabilização")
+st.markdown("""
+### Seu assistente virtual para produtos de impermeabilização
+
+Este sistema utiliza inteligência artificial para responder suas dúvidas sobre produtos de impermeabilização 
+de diversas marcas, com base nas fichas técnicas oficiais dos produtos.
+""")
+
+# Inicializa o estado da sessão se não existir
+if "conversation" not in st.session_state:
+    st.session_state.conversation = None
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "selected_brand" not in st.session_state:
+    st.session_state.selected_brand = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Tenta obter a chave da API do Groq de múltiplas fontes
+groq_api_key = os.environ.get("GROQ_API_KEY")
+
+# Limpa a chave se existir (remove espaços e caracteres invisíveis)
+if groq_api_key:
+    groq_api_key = groq_api_key.strip()
+
+# Tenta obter a chave dos segredos do Streamlit se não encontrada no ambiente
+if not groq_api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+    groq_api_key = st.secrets["GROQ_API_KEY"].strip()
+    # Adiciona a chave ao ambiente para que o módulo models.py possa acessá-la
+    os.environ["GROQ_API_KEY"] = groq_api_key
+
+# Verifica se a chave existe
+if not groq_api_key:
+    st.error("""
+    ⚠️ **Chave da API do Groq não encontrada!**
+    
+    Para usar este aplicativo, você precisa definir sua chave da API do Groq:
+    
+    1. No Streamlit Cloud: Adicione a variável `GROQ_API_KEY` nas configurações de segredos do app.
+    2. Localmente: Crie um arquivo `.env` na raiz do projeto com `GROQ_API_KEY=sua_chave_aqui`
+       ou um arquivo `.streamlit/secrets.toml` com `GROQ_API_KEY = "sua_chave_aqui"`
+    """)
+    
+    # Interface para inserir a chave manualmente
+    with st.expander("Inserir chave manualmente"):
+        manual_key = st.text_input("Chave da API do Groq", type="password")
+        if st.button("Salvar e Usar Chave") and manual_key:
+            # Verifica se a chave inserida é válida
+            is_valid, error = verify_groq_api_key(manual_key.strip())
+            if is_valid:
+                groq_api_key = manual_key.strip()
+                os.environ["GROQ_API_KEY"] = groq_api_key
+                st.success("✅ Chave válida! A aplicação está pronta para uso.")
+                st.experimental_rerun()
+            else:
+                st.error(f"❌ Chave inválida! Erro: {error}")
+    
+    if not groq_api_key:
+        st.stop()
+else:
+    # Verifica se a chave existente é válida
+    is_valid, error = verify_groq_api_key(groq_api_key)
+    if not is_valid:
+        st.error(f"""
+        ⚠️ **Chave da API do Groq inválida!**
+        
+        A chave da API encontrada não é válida. Erro: {error}
+        
+        Possíveis causas:
+        1. A chave está incorreta ou expirou
+        2. Há um problema de rede ou firewall
+        3. A chave tem caracteres invisíveis ou formatação incorreta
+        """)
+        
+        # Interface para inserir a chave manualmente
+        with st.expander("Inserir chave manualmente"):
+            manual_key = st.text_input("Chave da API do Groq", type="password")
+            if st.button("Salvar e Usar Chave") and manual_key:
+                # Verifica se a chave inserida é válida
+                is_valid, error = verify_groq_api_key(manual_key.strip())
+                if is_valid:
+                    groq_api_key = manual_key.strip()
+                    os.environ["GROQ_API_KEY"] = groq_api_key
+                    st.success("✅ Chave válida! A aplicação está pronta para uso.")
+                    st.experimental_rerun()
+                else:
+                    st.error(f"❌ Chave inválida! Erro: {error}")
+        
+        if not is_valid:
+            st.stop()
+
+# Verifica se existem bancos de dados vetoriais
+brands = get_available_brands()
+if not brands:
+    st.warning("""
+    ⚠️ **Nenhum banco de dados vetorial encontrado!**
+    
+    Para usar este aplicativo, você precisa primeiro processar os documentos e criar os bancos de dados vetoriais:
+    
+    1. Execute o script `ingest.py` para processar os documentos PDF e criar os bancos de dados.
+    """)
+    if st.button("Processar Documentos", type="primary"):
+        import ingest
+        ingest.main()
+        st.rerun()
+    st.stop()
+
+# Sidebar com seleção de marca
+with st.sidebar:
+    st.header("Selecione a Marca")
+    
+    # Transformar a lista de dicionários em uma lista de nomes para exibição
+    brand_options = [brand["display"] for brand in brands]
+    
+    # Dropdown para seleção de marca
+    selected_brand_display = st.selectbox(
+        "Marca:",
+        options=brand_options,
+        index=0 if brand_options else None
+    )
+    
+    # Encontrar o objeto completo da marca selecionada
+    selected_brand_obj = next((brand for brand in brands if brand["display"] == selected_brand_display), None)
+    
+    if selected_brand_obj and selected_brand_obj["folder"] != st.session_state.selected_brand:
+        st.session_state.selected_brand = selected_brand_obj["folder"]
+        st.session_state.conversation = get_conversation_chain(selected_brand_obj["folder"])
+        st.session_state.chat_history = []
+        st.session_state.messages = []
+        
+    st.markdown("---")
+    st.markdown("### Sobre este app")
+    st.markdown("""
+    Este aplicativo utiliza o modelo Llama 3 da Groq para responder perguntas sobre produtos de impermeabilização.
+    
+    As respostas são baseadas nas fichas técnicas oficiais dos produtos, fornecidas pelas respectivas fabricantes.
+    
+    Desenvolvido com Streamlit, LangChain e Groq AI.
+    """)
+
+# Interface principal de chat
+st.header(f"Chat com Especialista - {selected_brand_display}")
+
+# Exibe mensagens do histórico
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Campo de entrada de mensagem
+if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabilização..."):
+    # Adiciona mensagem do usuário ao histórico
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Exibe mensagem do usuário
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Verifica se a conversa foi inicializada
+    if not st.session_state.conversation:
+        st.error("Por favor, selecione uma marca antes de fazer perguntas.")
+        st.stop()
+    
+    # Exibe indicador de carregamento durante a geração da resposta
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        message_placeholder.markdown("Pensando...")
+        
+        try:
+            # Gera resposta
+            response = st.session_state.conversation({"question": prompt})
+            answer = response["answer"]
+            
+            # Atualiza histórico da conversação
+            st.session_state.chat_history = response["chat_history"]
+            
+            # Exibe resposta
+            message_placeholder.markdown(answer)
+            
+            # Adiciona resposta do assistente ao histórico
+            st.session_state.messages.append({"role": "assistant", "content": answer})
+        except Exception as e:
+            error_message = str(e)
+            message_placeholder.error(f"Erro ao gerar resposta: {error_message}")
+            if "401" in error_message and "Invalid API Key" in error_message:
+                st.error("""
+                ⚠️ **Erro de autenticação com a API do Groq**
+                
+                A chave da API parece ser inválida. Por favor, verifique sua chave e reinicie a aplicação.
+                """)
+
+# Botão para limpar histórico de chat
+if st.button("Limpar Chat"):
+    st.session_state.chat_history = []
+    st.session_state.messages = []
+    # Reinicializa a conversa com a marca selecionada
+    if st.session_state.selected_brand:
+        st.session_state.conversation = get_conversation_chain(st.session_state.selected_brand)
+    st.rerun() 
