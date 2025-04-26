@@ -273,11 +273,12 @@ def get_conversation_chain(brand):
         brand_display = brand.replace("FT - ", "").replace("FT_", "")
         logger.info(f"Nome da marca para exibição: {brand_display}")
         
-        # Configura a memória da conversação
+        # Configura a memória da conversação com chave de saída específica
         logger.info("Configurando memória da conversação...")
         memory = ConversationBufferMemory(
             memory_key="chat_history",
-            return_messages=True
+            return_messages=True,
+            output_key="answer"  # Especifica qual chave será armazenada na memória
         )
         
         # Mensagem do sistema para controlar o comportamento do modelo
@@ -323,7 +324,8 @@ Responda a pergunta do usuário com base APENAS no contexto técnico fornecido a
             verbose=True,
             combine_docs_chain_kwargs={"prompt": chat_prompt},
             chain_type="stuff",  # Usando o tipo "stuff" para melhor contexto
-            return_source_documents=True  # Retorna os documentos fonte para debugging
+            return_source_documents=True,  # Retorna os documentos fonte para debugging
+            output_key="answer"  # Define a chave de saída para a resposta
         )
         
         logger.info("Cadeia de conversação criada com sucesso")

@@ -379,9 +379,19 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
         message_placeholder.markdown("Pensando...")
         
         try:
-            # Gera resposta
+            # Gera resposta com tratamento para o novo formato
             response = st.session_state.conversation({"question": prompt})
-            answer = response["answer"]
+            
+            # Log da resposta completa para debug
+            logger.info(f"Resposta completa: {response.keys()}")
+            
+            # Extrai a resposta
+            if "answer" in response:
+                answer = response["answer"]
+            else:
+                # Fallback para compatibilidade com versões anteriores
+                answer = response.get("result", "Desculpe, não consegui processar sua pergunta.")
+                logger.warning("Usando campo 'result' como fallback para resposta")
             
             # Guarda os documentos fonte para exibição
             if "source_documents" in response:
@@ -392,8 +402,9 @@ if prompt := st.chat_input("Digite sua pergunta sobre produtos de impermeabiliza
                 for i, doc in enumerate(response["source_documents"]):
                     logger.info(f"Documento {i+1}: {doc.metadata}")
             
-            # Atualiza histórico da conversação
-            st.session_state.chat_history = response["chat_history"]
+            # Atualiza histórico da conversação (se disponível)
+            if "chat_history" in response:
+                st.session_state.chat_history = response["chat_history"]
             
             # Exibe resposta
             message_placeholder.markdown(answer)
