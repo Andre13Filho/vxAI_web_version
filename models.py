@@ -269,6 +269,10 @@ def get_conversation_chain(brand):
         llm = get_llm()
         vectordb = get_vectordb(brand)
         
+        # Extrai o nome da marca sem prefixos para mostrar no prompt
+        brand_display = brand.replace("FT - ", "").replace("FT_", "")
+        logger.info(f"Nome da marca para exibição: {brand_display}")
+        
         # Configura a memória da conversação
         logger.info("Configurando memória da conversação...")
         memory = ConversationBufferMemory(
@@ -277,7 +281,7 @@ def get_conversation_chain(brand):
         )
         
         # Mensagem do sistema para controlar o comportamento do modelo
-        system_template = """Você é um especialista em produtos de impermeabilização da marca {brand}.
+        system_template = """Você é um especialista em produtos de impermeabilização da marca """ + brand_display + """.
         
 Sua função é responder perguntas sobre os produtos com base EXCLUSIVAMENTE nas informações das fichas técnicas oficiais.
 
@@ -321,9 +325,6 @@ Responda a pergunta do usuário com base APENAS no contexto técnico fornecido a
             chain_type="stuff",  # Usando o tipo "stuff" para melhor contexto
             return_source_documents=True  # Retorna os documentos fonte para debugging
         )
-        
-        # Adiciona a marca como parâmetro para o template
-        conversation_chain.combine_docs_chain.llm_chain.prompt.messages[0].prompt.partial_variables["brand"] = brand.replace("FT - ", "").replace("FT_", "")
         
         logger.info("Cadeia de conversação criada com sucesso")
         
