@@ -132,31 +132,101 @@ def get_vectordb(brand):
         embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         logger.info("Embeddings carregados com sucesso")
         
-        # Carrega o banco de dados vetorial com configurações compatíveis para versões antigas do SQLite
+        # Carrega o banco de dados vetorial com configurações compatíveis
         logger.info(f"Carregando banco de dados vetorial de {persist_directory}...")
         
-        # Configurações específicas para garantir compatibilidade
-        client_settings = {
-            "anonymized_telemetry": False
-        }
-        
-        # Tentativa com configurações específicas para compatibilidade
+        # Tentativa de carregamento sem configurações extras primeiro
         try:
+            logger.info("Tentando carregar ChromaDB sem configurações especiais...")
             vectordb = Chroma(
                 persist_directory=persist_directory,
-                embedding_function=embeddings,
-                client_settings=client_settings
+                embedding_function=embeddings
             )
-            logger.info("Banco de dados vetorial carregado com sucesso")
+            logger.info("Banco de dados vetorial carregado com sucesso (modo padrão)")
             return vectordb
-        except Exception as e:
-            error_details = traceback.format_exc()
-            logger.error(f"Erro ao carregar ChromaDB: {e}\n{error_details}")
+        except Exception as first_error:
+            logger.warning(f"Erro no primeiro método de carregamento: {str(first_error)}")
+            logger.info("Tentando método alternativo de carregamento...")
             
-            # Verificando se o erro está relacionado ao SQLite
-            if "sqlite3" in str(e).lower():
-                raise ValueError(f"Erro com SQLite: {e}. Por favor, atualize o requirements.txt para incluir 'pysqlite3-binary>=0.4.9'")
-            raise
+            try:
+                # Se falhar, tenta importar usando o módulo chromadb diretamente
+                # para configurações mais específicas
+                from chromadb.config import Settings
+                import chromadb
+                
+                # Inicializa o cliente com configurações compatíveis
+                logger.info("Inicializando cliente ChromaDB diretamente...")
+                chroma_client = chromadb.PersistentClient(
+                    path=persist_directory,
+                    settings=Settings(
+                        anonymized_telemetry=False,
+                        allow_reset=True,
+                        is_persistent=True
+                    )
+                )
+                
+                # Get the default collection
+                logger.info("Obtendo coleção padrão...")
+                collection_name = "langchain"  # Nome padrão usado pelo LangChain
+                try:
+                    collection = chroma_client.get_collection(collection_name)
+                    logger.info(f"Coleção '{collection_name}' encontrada")
+                except Exception:
+                    logger.warning(f"Coleção '{collection_name}' não encontrada, listando coleções disponíveis...")
+                    collections = chroma_client.list_collections()
+                    if collections:
+                        collection_name = collections[0].name
+                        collection = chroma_client.get_collection(collection_name)
+                        logger.info(f"Usando coleção alternativa: {collection_name}")
+                    else:
+                        raise ValueError("Nenhuma coleção encontrada no banco de dados vetorial")
+                
+                # Criar uma instância do Chroma usando o cliente e coleção
+                logger.info("Criando instância Chroma a partir do cliente personalizado...")
+                vectordb = Chroma(
+                    client=chroma_client,
+                    collection_name=collection_name,
+                    embedding_function=embeddings
+                )
+                logger.info("Banco de dados vetorial carregado com sucesso (modo alternativo)")
+                return vectordb
+            except Exception as second_error:
+                error_details = traceback.format_exc()
+                logger.error(f"Erro no segundo método de carregamento: {str(second_error)}\n{error_details}")
+                
+                # Se ambos falharem, tenta um terceiro método mais básico
+                try:
+                    logger.info("Tentando método de último recurso...")
+                    # Use um diretório temporário novo para reconstruir o banco
+                    import shutil
+                    import tempfile
+                    
+                    # Cria um diretório temporário
+                    temp_dir = tempfile.mkdtemp()
+                    logger.info(f"Diretório temporário criado: {temp_dir}")
+                    
+                    # Copia os arquivos do banco de dados para o diretório temporário
+                    for item in os.listdir(persist_directory):
+                        src = os.path.join(persist_directory, item)
+                        dst = os.path.join(temp_dir, item)
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst)
+                        else:
+                            shutil.copy2(src, dst)
+                    
+                    # Tenta carregar a partir do diretório temporário
+                    vectordb = Chroma(
+                        persist_directory=temp_dir,
+                        embedding_function=embeddings
+                    )
+                    logger.info("Banco de dados vetorial carregado com sucesso (modo de recuperação)")
+                    return vectordb
+                except Exception as third_error:
+                    logger.error(f"Todos os métodos de carregamento falharam. Último erro: {str(third_error)}")
+                    # Verificando se o erro está relacionado ao SQLite
+                    if "sqlite3" in str(third_error).lower():
+                        raise ValueError(f"Erro com SQLite: {third_error}. É necessário um SQLite mais recente.")
+                    raise ValueError(f"Não foi possível carregar o banco de dados vetorial após várias tentativas: {str(third_error)}")
     except Exception as e:
         logger.error(f"Erro ao carregar o banco de dados vetorial: {str(e)}")
         raise
