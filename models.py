@@ -281,19 +281,161 @@ def get_conversation_chain(brand):
             output_key="answer"  # Especifica qual chave será armazenada na memória
         )
         
+        # Cria um retriever personalizado com filtro de metadados
+        logger.info("Configurando retriever com filtro de metadados para produtos específicos...")
+        retriever = vectordb.as_retriever(
+            search_type="similarity",  # Busca por similaridade
+            search_kwargs={
+                "k": 3,  # Recupera 3 documentos, mas só usará o primeiro para responder
+                "filter": None  # O filtro será aplicado dinamicamente na função abaixo
+            }
+        )
+        
+        # Função para extrair o nome do produto da pergunta e filtrar resultados
+        def get_relevant_documents(question):
+            # Lista de produtos conhecidos (adaptado para cada marca)
+            # Mapeia partes dos nomes comuns dos produtos para os nomes exatos dos arquivos
+            product_mapping = {
+                # Produtos SIKA
+                "igolasfal": "IgolEcoasfalto",
+                "igol asfal": "IgolEcoasfalto",
+                "igol eco": "IgolEcoasfalto",
+                "ecoasfal": "IgolEcoasfalto",
+                "igolecoasfal": "IgolEcoasfalto",
+                "igol s": "Igol S",
+                "igol 2": "Igol®-2",
+                "igolflex": "Igolflex",  # Base para Igolflex Fachada ou Preto
+                "fachada": "Igolflex Fachada",
+                "preto": "Igolflex Preto",
+                "impermur": "Impermur_Sikagard",
+                "sikagard": "Impermur_Sikagard",
+                "impersika": "Impersika",
+                "pk premium": "PK Premium Superflex",
+                "pk superflex": "PK Premium Superflex",
+                "premium superflex": "PK Premium Superflex",
+                "sika 1": "Sika 1",
+                "sika1": "Sika 1",
+                "sika 2": "Sika 2",
+                "sika2": "Sika 2",
+                "sika 3": "Sika 3 Plus",
+                "sika3": "Sika 3 Plus",
+                "sika plus": "Sika 3 Plus",
+                "chapisco": "Sika Chapisco Plus",
+                "concreto forte": "Sika Concreto Forte",
+                "eco primer": "Sika Eco Primer",
+                "intraplast": "Sika Intraplast N",
+                "monotop": "Sika Monotop 123 Rodapé",
+                "rodapé": "Sika Monotop 123 Rodapé",
+                "multiseal": "Sika Multiseal Primer",
+                "separol": "Sika Separol Top",
+                "silicone": "Sika Silicone",
+                "sikabond 134": "SikaBond 134",
+                "sikabond at": "SikaBond AT Universal",
+                "sikacryl": "SikaCryl 203",
+                "sikadur 31": "Sikadur 31",
+                "sikadur 32 gel": "Sikadur 32 Gel",
+                "sikadur 32": "Sikadur 32",
+                "sikadur 512": "Sikadur 512",
+                "sikadur epoxi": "Sikadur Epoxi",
+                "sikafill rápido power": "Sikafill Rápido Power",
+                "sikafill rápido": "Sikafill Rápido",
+                "sikaflex 1a": "Sikaflex 1A Plus",
+                "sikaflex construction": "Sikaflex Construction",
+                "sikaflex universal": "Sikaflex Universal",
+                "sikagrout 250": "Sikagrout 250",
+                "sikagrout tix": "Sikagrout Tix",
+                "sikanol": "Sikanol Alvenaria",
+                "alvenaria": "Sikanol Alvenaria",
+                "sikashield alu": "SikaShield P34 ALU Tipo II 4 mm",
+                "sikashield 3mm": "SikaShield P34 PE Tipo II 3 mm",
+                "sikashield 4mm": "SikaShield P34 PE Tipo II 4 mm",
+                "sikatop 100": "Sikatop 100",
+                "sikatop 107": "Sikatop 107",
+                "sikatop flex": "Sikatop Flex",
+                # Adicionar mapeamentos para outras marcas conforme necessário
+            }
+            
+            # Verifica se algum produto específico é mencionado na pergunta
+            question_lower = question.lower()
+            identified_product = None
+            
+            for keyword, product_name in product_mapping.items():
+                if keyword.lower() in question_lower:
+                    identified_product = product_name
+                    logger.info(f"Produto identificado na pergunta: {product_name}")
+                    break
+            
+            if identified_product:
+                # Se um produto específico for identificado, filtra os resultados para incluí-lo
+                logger.info(f"Aplicando filtro para o produto: {identified_product}")
+                
+                # Como o filtro exato pode variar, tentamos algumas combinações possíveis
+                docs_with_filter = []
+                
+                # Tenta filtrar por produto exato
+                try:
+                    filter_dict = {"product": identified_product}
+                    docs_with_filter = vectordb.similarity_search(
+                        question, k=3, filter=filter_dict
+                    )
+                    logger.info(f"Encontrados {len(docs_with_filter)} documentos com filtro exato.")
+                except Exception as e:
+                    logger.warning(f"Erro ao aplicar filtro exato: {str(e)}")
+                
+                # Se não encontrar resultados, tenta busca parcial
+                if not docs_with_filter:
+                    try:
+                        # Busca sem filtro e depois filtra manualmente
+                        all_docs = vectordb.similarity_search(question, k=10)
+                        for doc in all_docs:
+                            if identified_product.lower() in doc.metadata.get("product", "").lower():
+                                docs_with_filter.append(doc)
+                                if len(docs_with_filter) >= 3:
+                                    break
+                        logger.info(f"Encontrados {len(docs_with_filter)} documentos com filtro manual.")
+                    except Exception as e:
+                        logger.warning(f"Erro ao aplicar filtro manual: {str(e)}")
+                
+                # Se ainda não encontrar, usa a busca padrão
+                if docs_with_filter:
+                    return docs_with_filter
+            
+            # Se nenhum produto for identificado ou se a filtragem falhar, retorna os documentos normalmente
+            logger.info("Usando busca padrão sem filtro de produto específico")
+            return vectordb.similarity_search(question, k=3)
+        
+        # Substitui o retriever padrão pelo retriever personalizado
+        retriever.get_relevant_documents = get_relevant_documents
+        
+        # Cria uma classe wrapper para o retriever que limita os resultados
+        class SingleDocumentRetriever:
+            def __init__(self, base_retriever):
+                self.base_retriever = base_retriever
+            
+            def get_relevant_documents(self, query):
+                docs = self.base_retriever.get_relevant_documents(query)
+                if docs:
+                    # Retorna apenas o primeiro documento
+                    logger.info(f"Limitando a resposta a um único documento: {docs[0].metadata.get('product', 'Desconhecido')}")
+                    return [docs[0]]
+                return []
+        
+        # Envolve o retriever para garantir que apenas um documento seja usado
+        single_doc_retriever = SingleDocumentRetriever(retriever)
+        
         # Mensagem do sistema para controlar o comportamento do modelo
         system_template = """Você é um especialista em produtos de impermeabilização da marca """ + brand_display + """.
         
 Sua função é responder perguntas sobre os produtos com base EXCLUSIVAMENTE nas informações das fichas técnicas oficiais.
 
 REGRAS IMPORTANTES:
-1. Use APENAS as informações fornecidas nas fichas técnicas para responder.
-2. Se a informação solicitada não estiver nas fichas técnicas, informe claramente que não possui essa informação.
-3. NÃO INVENTE ou DEDUZA informações que não estejam explicitamente nas fichas técnicas.
-4. Cite especificamente de qual produto vem a informação que você está mencionando.
-5. Se for solicitado a comparar produtos, faça isso apenas baseado nas fichas técnicas disponíveis.
-6. Seu conhecimento vem exclusivamente das fichas técnicas, não de outras fontes ou experiência prévia.
-7. Sempre responda em português brasileiro.
+1. Use APENAS as informações fornecidas na ficha técnica do produto específico mencionado na pergunta.
+2. Se a informação solicitada não estiver na ficha técnica do produto, informe claramente que não possui essa informação.
+3. NÃO INVENTE ou DEDUZA informações que não estejam explicitamente na ficha técnica.
+4. Foque apenas no produto específico mencionado na pergunta do usuário.
+5. Não compare produtos a menos que seja explicitamente solicitado, e somente se tiver informações de ambos.
+6. Seu conhecimento vem exclusivamente da ficha técnica, não de outras fontes ou experiência prévia.
+7. Se o usuário não mencionar um produto específico, pergunte qual produto ele deseja saber informações antes de fornecer detalhes.
 
 Contexto técnico recuperado: 
 {context}
@@ -301,7 +443,7 @@ Contexto técnico recuperado:
 Histórico da conversa:
 {chat_history}
 
-Responda a pergunta do usuário com base APENAS no contexto técnico fornecido acima.
+Responda a pergunta do usuário com base APENAS no contexto técnico fornecido acima e APENAS sobre o produto específico perguntado.
 """
         
         # Mensagem do usuário
@@ -320,7 +462,7 @@ Responda a pergunta do usuário com base APENAS no contexto técnico fornecido a
         logger.info("Criando cadeia de conversação com prompt personalizado...")
         conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
-            retriever=vectordb.as_retriever(search_kwargs={"k": 8}),  # Aumentando o número de documentos recuperados
+            retriever=single_doc_retriever,
             memory=memory,
             verbose=True,
             combine_docs_chain_kwargs={"prompt": chat_prompt},
