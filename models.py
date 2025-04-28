@@ -16,6 +16,7 @@ import logging
 import sys
 import importlib.util
 import traceback
+from langchain.schema.retriever import BaseRetriever
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -290,129 +291,124 @@ def get_conversation_chain(brand):
             }
         )
         
-        # Função para extrair o nome do produto da pergunta e filtrar resultados
-        def get_relevant_documents_custom(question):
-            # Lista de produtos conhecidos (adaptado para cada marca)
-            # Mapeia partes dos nomes comuns dos produtos para os nomes exatos dos arquivos
-            product_mapping = {
-                # Produtos SIKA
-                "igolasfal": "IgolEcoasfalto",
-                "igol asfal": "IgolEcoasfalto",
-                "igol eco": "IgolEcoasfalto",
-                "ecoasfal": "IgolEcoasfalto",
-                "igolecoasfal": "IgolEcoasfalto",
-                "igol s": "Igol S",
-                "igol 2": "Igol®-2",
-                "igolflex": "Igolflex",  # Base para Igolflex Fachada ou Preto
-                "fachada": "Igolflex Fachada",
-                "preto": "Igolflex Preto",
-                "impermur": "Impermur_Sikagard",
-                "sikagard": "Impermur_Sikagard",
-                "impersika": "Impersika",
-                "pk premium": "PK Premium Superflex",
-                "pk superflex": "PK Premium Superflex",
-                "premium superflex": "PK Premium Superflex",
-                "sika 1": "Sika 1",
-                "sika1": "Sika 1",
-                "sika 2": "Sika 2",
-                "sika2": "Sika 2",
-                "sika 3": "Sika 3 Plus",
-                "sika3": "Sika 3 Plus",
-                "sika plus": "Sika 3 Plus",
-                "chapisco": "Sika Chapisco Plus",
-                "concreto forte": "Sika Concreto Forte",
-                "eco primer": "Sika Eco Primer",
-                "intraplast": "Sika Intraplast N",
-                "monotop": "Sika Monotop 123 Rodapé",
-                "rodapé": "Sika Monotop 123 Rodapé",
-                "multiseal": "Sika Multiseal Primer",
-                "separol": "Sika Separol Top",
-                "silicone": "Sika Silicone",
-                "sikabond 134": "SikaBond 134",
-                "sikabond at": "SikaBond AT Universal",
-                "sikacryl": "SikaCryl 203",
-                "sikadur 31": "Sikadur 31",
-                "sikadur 32 gel": "Sikadur 32 Gel",
-                "sikadur 32": "Sikadur 32",
-                "sikadur 512": "Sikadur 512",
-                "sikadur epoxi": "Sikadur Epoxi",
-                "sikafill rápido power": "Sikafill Rápido Power",
-                "sikafill rápido": "Sikafill Rápido",
-                "sikaflex 1a": "Sikaflex 1A Plus",
-                "sikaflex construction": "Sikaflex Construction",
-                "sikaflex universal": "Sikaflex Universal",
-                "sikagrout 250": "Sikagrout 250",
-                "sikagrout tix": "Sikagrout Tix",
-                "sikanol": "Sikanol Alvenaria",
-                "alvenaria": "Sikanol Alvenaria",
-                "sikashield alu": "SikaShield P34 ALU Tipo II 4 mm",
-                "sikashield 3mm": "SikaShield P34 PE Tipo II 3 mm",
-                "sikashield 4mm": "SikaShield P34 PE Tipo II 4 mm",
-                "sikatop 100": "Sikatop 100",
-                "sikatop 107": "Sikatop 107",
-                "sikatop flex": "Sikatop Flex",
-                # Adicionar mapeamentos para outras marcas conforme necessário
-            }
-            
-            # Verifica se algum produto específico é mencionado na pergunta
-            question_lower = question.lower()
-            identified_product = None
-            
-            for keyword, product_name in product_mapping.items():
-                if keyword.lower() in question_lower:
-                    identified_product = product_name
-                    logger.info(f"Produto identificado na pergunta: {product_name}")
-                    break
-            
-            if identified_product:
-                # Se um produto específico for identificado, filtra os resultados para incluí-lo
-                logger.info(f"Aplicando filtro para o produto: {identified_product}")
-                
-                # Como o filtro exato pode variar, tentamos algumas combinações possíveis
-                docs_with_filter = []
-                
-                # Tenta filtrar por produto exato
-                try:
-                    filter_dict = {"product": identified_product}
-                    docs_with_filter = vectordb.similarity_search(
-                        question, k=3, filter=filter_dict
-                    )
-                    logger.info(f"Encontrados {len(docs_with_filter)} documentos com filtro exato.")
-                except Exception as e:
-                    logger.warning(f"Erro ao aplicar filtro exato: {str(e)}")
-                
-                # Se não encontrar resultados, tenta busca parcial
-                if not docs_with_filter:
-                    try:
-                        # Busca sem filtro e depois filtra manualmente
-                        all_docs = vectordb.similarity_search(question, k=10)
-                        for doc in all_docs:
-                            if identified_product.lower() in doc.metadata.get("product", "").lower():
-                                docs_with_filter.append(doc)
-                                if len(docs_with_filter) >= 3:
-                                    break
-                        logger.info(f"Encontrados {len(docs_with_filter)} documentos com filtro manual.")
-                    except Exception as e:
-                        logger.warning(f"Erro ao aplicar filtro manual: {str(e)}")
-                
-                # Se ainda não encontrar, usa a busca padrão
-                if docs_with_filter:
-                    return docs_with_filter[:1]  # Retorna apenas o primeiro documento
-            
-            # Se nenhum produto for identificado ou se a filtragem falhar, retorna os documentos normalmente
-            logger.info("Usando busca padrão sem filtro de produto específico")
-            docs = vectordb.similarity_search(question, k=1)
-            return docs
-        
         # Cria uma classe que embrulha o retriever
-        from langchain.schema.retriever import BaseRetriever
-
         class CustomRetriever(BaseRetriever):
             def __init__(self, vectordb):
                 self.vectordb = vectordb
+                super().__init__()
             
             def get_relevant_documents(self, query):
-                return get_relevant_documents_custom(query)
+                # Lista de produtos conhecidos (adaptado para cada marca)
+                # Mapeia partes dos nomes comuns dos produtos para os nomes exatos dos arquivos
+                product_mapping = {
+                    # Produtos SIKA
+                    "igolasfal": "IgolEcoasfalto",
+                    "igol asfal": "IgolEcoasfalto",
+                    "igol eco": "IgolEcoasfalto",
+                    "ecoasfal": "IgolEcoasfalto",
+                    "igolecoasfal": "IgolEcoasfalto",
+                    "igol s": "Igol S",
+                    "igol 2": "Igol®-2",
+                    "igolflex": "Igolflex",  # Base para Igolflex Fachada ou Preto
+                    "fachada": "Igolflex Fachada",
+                    "preto": "Igolflex Preto",
+                    "impermur": "Impermur_Sikagard",
+                    "sikagard": "Impermur_Sikagard",
+                    "impersika": "Impersika",
+                    "pk premium": "PK Premium Superflex",
+                    "pk superflex": "PK Premium Superflex",
+                    "premium superflex": "PK Premium Superflex",
+                    "sika 1": "Sika 1",
+                    "sika1": "Sika 1",
+                    "sika 2": "Sika 2",
+                    "sika2": "Sika 2",
+                    "sika 3": "Sika 3 Plus",
+                    "sika3": "Sika 3 Plus",
+                    "sika plus": "Sika 3 Plus",
+                    "chapisco": "Sika Chapisco Plus",
+                    "concreto forte": "Sika Concreto Forte",
+                    "eco primer": "Sika Eco Primer",
+                    "intraplast": "Sika Intraplast N",
+                    "monotop": "Sika Monotop 123 Rodapé",
+                    "rodapé": "Sika Monotop 123 Rodapé",
+                    "multiseal": "Sika Multiseal Primer",
+                    "separol": "Sika Separol Top",
+                    "silicone": "Sika Silicone",
+                    "sikabond 134": "SikaBond 134",
+                    "sikabond at": "SikaBond AT Universal",
+                    "sikacryl": "SikaCryl 203",
+                    "sikadur 31": "Sikadur 31",
+                    "sikadur 32 gel": "Sikadur 32 Gel",
+                    "sikadur 32": "Sikadur 32",
+                    "sikadur 512": "Sikadur 512",
+                    "sikadur epoxi": "Sikadur Epoxi",
+                    "sikafill rápido power": "Sikafill Rápido Power",
+                    "sikafill rápido": "Sikafill Rápido",
+                    "sikaflex 1a": "Sikaflex 1A Plus",
+                    "sikaflex construction": "Sikaflex Construction",
+                    "sikaflex universal": "Sikaflex Universal",
+                    "sikagrout 250": "Sikagrout 250",
+                    "sikagrout tix": "Sikagrout Tix",
+                    "sikanol": "Sikanol Alvenaria",
+                    "alvenaria": "Sikanol Alvenaria",
+                    "sikashield alu": "SikaShield P34 ALU Tipo II 4 mm",
+                    "sikashield 3mm": "SikaShield P34 PE Tipo II 3 mm",
+                    "sikashield 4mm": "SikaShield P34 PE Tipo II 4 mm",
+                    "sikatop 100": "Sikatop 100",
+                    "sikatop 107": "Sikatop 107",
+                    "sikatop flex": "Sikatop Flex",
+                    # Adicionar mapeamentos para outras marcas conforme necessário
+                }
+                
+                # Verifica se algum produto específico é mencionado na pergunta
+                question_lower = query.lower()
+                identified_product = None
+                
+                for keyword, product_name in product_mapping.items():
+                    if keyword.lower() in question_lower:
+                        identified_product = product_name
+                        logger.info(f"Produto identificado na pergunta: {product_name}")
+                        break
+                
+                if identified_product:
+                    # Se um produto específico for identificado, filtra os resultados para incluí-lo
+                    logger.info(f"Aplicando filtro para o produto: {identified_product}")
+                    
+                    # Como o filtro exato pode variar, tentamos algumas combinações possíveis
+                    docs_with_filter = []
+                    
+                    # Tenta filtrar por produto exato
+                    try:
+                        filter_dict = {"product": identified_product}
+                        docs_with_filter = self.vectordb.similarity_search(
+                            query, k=3, filter=filter_dict
+                        )
+                        logger.info(f"Encontrados {len(docs_with_filter)} documentos com filtro exato.")
+                    except Exception as e:
+                        logger.warning(f"Erro ao aplicar filtro exato: {str(e)}")
+                    
+                    # Se não encontrar resultados, tenta busca parcial
+                    if not docs_with_filter:
+                        try:
+                            # Busca sem filtro e depois filtra manualmente
+                            all_docs = self.vectordb.similarity_search(query, k=10)
+                            for doc in all_docs:
+                                if identified_product.lower() in doc.metadata.get("product", "").lower():
+                                    docs_with_filter.append(doc)
+                                    if len(docs_with_filter) >= 3:
+                                        break
+                            logger.info(f"Encontrados {len(docs_with_filter)} documentos com filtro manual.")
+                        except Exception as e:
+                            logger.warning(f"Erro ao aplicar filtro manual: {str(e)}")
+                    
+                    # Se ainda não encontrar, usa a busca padrão
+                    if docs_with_filter:
+                        return docs_with_filter[:1]  # Retorna apenas o primeiro documento
+                
+                # Se nenhum produto for identificado ou se a filtragem falhar, retorna os documentos normalmente
+                logger.info("Usando busca padrão sem filtro de produto específico")
+                docs = self.vectordb.similarity_search(query, k=1)
+                return docs
             
             async def aget_relevant_documents(self, query):
                 # Implementação assíncrona (necessária para a interface BaseRetriever)
