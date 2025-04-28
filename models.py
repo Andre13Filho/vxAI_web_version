@@ -12,6 +12,9 @@ from langchain.prompts.chat import (
     HumanMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
+from typing import Any
+from pydantic import Field
+from langchain.schema.retriever import BaseRetriever
 import logging
 import sys
 import importlib.util
@@ -290,13 +293,21 @@ def get_conversation_chain(brand):
             }
         )
         
-        # Cria uma classe que implementa a interface de retriever sem herdar da classe base
-        class CustomRetriever:
+        # Cria uma classe que implementa a interface de retriever com compatibilidade v2
+        class CustomRetriever(BaseRetriever):
             """Retriever personalizado que implementa a interface do BaseRetriever."""
+            
+            model_config = {
+                "arbitrary_types_allowed": True,
+                "populate_by_name": True
+            }
+            
+            vectordb: Any = Field(default=None, exclude=True)
             
             def __init__(self, vectordb):
                 """Inicializa o retriever com o banco de dados vetorial."""
                 self.vectordb = vectordb
+                super().__init__()
             
             def get_relevant_documents(self, query):
                 """Busca documentos relevantes para a consulta com filtro de produto."""
