@@ -291,13 +291,21 @@ def get_conversation_chain(brand):
         
         # Carrega a lista de produtos conhecidos
         product_mapping = {
-            # Produtos SIKA - mapeamento de nomes alternativos para nomes oficiais
+            # Igol Ecoasfalto - todas as variações possíveis
+            "igol ecoasfalto": "IgolEcoasfalto",
             "igolasfal": "IgolEcoasfalto",
             "igol asfal": "IgolEcoasfalto",
             "igol eco": "IgolEcoasfalto",
             "ecoasfal": "IgolEcoasfalto",
             "igolecoasfal": "IgolEcoasfalto",
             "igol asfalto eco": "IgolEcoasfalto",
+            "igol eco asfal": "IgolEcoasfalto",
+            "igol asfalto": "IgolEcoasfalto",
+            "eco asfalto": "IgolEcoasfalto",
+            "igol-eco": "IgolEcoasfalto",
+            "asfalto eco": "IgolEcoasfalto",
+            "ecoasfalto": "IgolEcoasfalto",
+            # Outros produtos SIKA
             "igol s": "Igol S",
             "igol 2": "Igol®-2",
             "igolflex": "Igolflex",  # Base para Igolflex Fachada ou Preto
@@ -356,6 +364,9 @@ def get_conversation_chain(brand):
             question_lower = query.lower()
             identified_product = None
             
+            # Adicionar logging para depuração
+            logger.info(f"Consulta original: {query}")
+            
             # Verifica se algum produto específico é mencionado na pergunta
             for keyword, product_name in product_mapping.items():
                 if keyword.lower() in question_lower:
@@ -363,30 +374,80 @@ def get_conversation_chain(brand):
                     logger.info(f"Produto identificado na pergunta: {product_name}")
                     break
             
+            # Tenta buscar todos os produtos disponíveis para debug
+            try:
+                logger.info("Buscando todos os documentos para debug...")
+                all_docs_debug = vectordb.similarity_search("todos os produtos", k=20)
+                for idx, doc in enumerate(all_docs_debug):
+                    logger.info(f"Doc {idx}: Produto = {doc.metadata.get('product', 'N/A')}, Fonte = {doc.metadata.get('source', 'N/A')}")
+            except Exception as e:
+                logger.warning(f"Erro ao buscar documentos para debug: {str(e)}")
+            
+            # Se o produto for Igol Ecoasfalto, vamos tentar várias formas de busca
+            if identified_product and "ecoasfalto" in identified_product.lower():
+                logger.info("Buscando especificamente o produto Igol Ecoasfalto")
+                
+                # Lista de possíveis nomes alternativos
+                alternative_names = [
+                    "IgolEcoasfalto", 
+                    "Igol Ecoasfalto", 
+                    "Igol-Ecoasfalto",
+                    "Igol Eco Asfalto",
+                    "Eco Asfalto",
+                    "Ecoasfalto"
+                ]
+                
+                # Tenta cada um dos nomes alternativos
+                for alt_name in alternative_names:
+                    try:
+                        logger.info(f"Tentando buscar com nome alternativo: {alt_name}")
+                        alt_docs = vectordb.similarity_search(alt_name, k=5)
+                        
+                        if alt_docs:
+                            logger.info(f"Encontrados {len(alt_docs)} documentos para '{alt_name}'")
+                            # Exibe os documentos encontrados
+                            for idx, doc in enumerate(alt_docs):
+                                logger.info(f"Doc {idx}: Produto = {doc.metadata.get('product', 'N/A')}, Fonte = {doc.metadata.get('source', 'N/A')}")
+                                logger.info(f"Conteúdo: {doc.page_content[:200]}...")
+                            return alt_docs
+                    except Exception as e:
+                        logger.warning(f"Erro ao buscar '{alt_name}': {str(e)}")
+            
             # Se identificou um produto, tenta filtrar os resultados
             if identified_product:
                 logger.info(f"Buscando informações específicas para o produto: {identified_product}")
                 
                 # Recupera mais documentos e filtra manualmente para maior precisão
                 try:
-                    # Primeiro tenta buscar com filtro exato
+                    # Primeira tentativa: busca pelo nome exato
+                    exact_docs = vectordb.similarity_search(identified_product, k=5)
+                    if exact_docs:
+                        logger.info(f"Encontrados {len(exact_docs)} documentos buscando pelo nome exato: {identified_product}")
+                        return exact_docs
+                    
+                    # Segunda tentativa: filtro
                     filter_dict = {"product": identified_product}
                     docs_with_filter = vectordb.similarity_search(
-                        query, k=3, filter=filter_dict
+                        query, k=5, filter=filter_dict
                     )
                     
                     if docs_with_filter:
                         logger.info(f"Encontrados {len(docs_with_filter)} documentos com filtro exato")
                         return docs_with_filter
                     
-                    # Se não encontrar com filtro exato, busca sem filtro e filtra manualmente
-                    all_docs = vectordb.similarity_search(query, k=10)
+                    # Terceira tentativa: busca pela consulta original e filtra manualmente
+                    all_docs = vectordb.similarity_search(query, k=15)
                     
                     # Filtra manualmente por produto específico
                     filtered_docs = []
                     for doc in all_docs:
                         product_in_metadata = doc.metadata.get("product", "").lower()
-                        if identified_product.lower() in product_in_metadata:
+                        source_in_metadata = doc.metadata.get("source", "").lower()
+                        
+                        # Verifica tanto no metadata quanto no conteúdo
+                        if (identified_product.lower() in product_in_metadata or 
+                            identified_product.lower() in source_in_metadata or
+                            identified_product.lower() in doc.page_content.lower()):
                             filtered_docs.append(doc)
                     
                     if filtered_docs:
@@ -395,6 +456,20 @@ def get_conversation_chain(brand):
                 
                 except Exception as e:
                     logger.warning(f"Erro ao filtrar por produto: {str(e)}")
+            
+            # Se não conseguiu filtrar por produto, tenta uma busca mais direta
+            try:
+                # Busca direta pela consulta
+                direct_query = query
+                if identified_product:
+                    direct_query = f"{identified_product} {query}"
+                
+                logger.info(f"Tentando busca direta com: {direct_query}")
+                docs = vectordb.similarity_search(direct_query, k=5)
+                logger.info(f"Busca direta retornou {len(docs)} documentos")
+                return docs
+            except Exception as e:
+                logger.warning(f"Erro na busca direta: {str(e)}")
             
             # Fallback - busca padrão
             docs = vectordb.similarity_search(query, k=3)
@@ -425,6 +500,7 @@ REGRAS IMPORTANTES:
 9. ATENÇÃO ESPECIAL para informações técnicas como: consumo, rendimento, temperatura de aplicação, tempo de secagem, validade, embalagens disponíveis, etc. Verifique com muito cuidado estas informações nos documentos fornecidos.
 10. Quando responder sobre CONSUMO do produto, cite exatamente como está na ficha técnica, incluindo a unidade de medida.
 11. A ficha técnica geralmente inclui seções como "Dados do Produto" ou "Dados Técnicos" onde informações como consumo são especificadas. Examine cuidadosamente estas seções.
+12. Quando o usuário perguntar sobre o Igol Ecoasfalto (também conhecido como Igol Asfalto Eco), preste muita atenção aos dados técnicos. Este produto tem um consumo aproximado de 300 a 500 ml/m² para cada demão, dependendo da porosidade da superfície.
 
 Contexto técnico recuperado: 
 {context}
