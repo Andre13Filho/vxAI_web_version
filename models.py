@@ -16,7 +16,6 @@ import logging
 import sys
 import importlib.util
 import traceback
-from langchain.schema.retriever import BaseRetriever
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -282,22 +281,25 @@ def get_conversation_chain(brand):
             output_key="answer"  # Especifica qual chave será armazenada na memória
         )
         
-        # Cria um retriever personalizado com filtro de metadados
-        logger.info("Configurando retriever com filtro de metadados para produtos específicos...")
+        # Cria um retriever padrão como fallback
+        logger.info("Configurando retriever padrão como fallback...")
         retriever = vectordb.as_retriever(
             search_type="similarity",  # Busca por similaridade
             search_kwargs={
-                "k": 3,  # Recupera 3 documentos, mas só usará o primeiro para responder
+                "k": 3,  # Recupera 3 documentos
             }
         )
         
-        # Cria uma classe que embrulha o retriever
-        class CustomRetriever(BaseRetriever):
+        # Cria uma classe que implementa a interface de retriever sem herdar da classe base
+        class CustomRetriever:
+            """Retriever personalizado que implementa a interface do BaseRetriever."""
+            
             def __init__(self, vectordb):
+                """Inicializa o retriever com o banco de dados vetorial."""
                 self.vectordb = vectordb
-                super().__init__()
             
             def get_relevant_documents(self, query):
+                """Busca documentos relevantes para a consulta com filtro de produto."""
                 # Lista de produtos conhecidos (adaptado para cada marca)
                 # Mapeia partes dos nomes comuns dos produtos para os nomes exatos dos arquivos
                 product_mapping = {
@@ -411,7 +413,7 @@ def get_conversation_chain(brand):
                 return docs
             
             async def aget_relevant_documents(self, query):
-                # Implementação assíncrona (necessária para a interface BaseRetriever)
+                """Implementação assíncrona (necessária para compatibilidade)."""
                 return self.get_relevant_documents(query)
         
         # Cria uma instância do retriever personalizado
